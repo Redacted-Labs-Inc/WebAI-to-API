@@ -1,6 +1,5 @@
 # src/app/utils/browser.py
 import logging
-import browser_cookie3
 import platform
 import os
 import sqlite3
@@ -9,6 +8,14 @@ import base64
 from pathlib import Path
 from typing import Optional, Literal, Dict, Any
 from app.config import CONFIG
+
+# Optional dependency - not available on ARM builds
+try:
+    import browser_cookie3
+    HAS_BROWSER_COOKIE3 = True
+except ImportError:
+    browser_cookie3 = None
+    HAS_BROWSER_COOKIE3 = False
 
 # Windows-specific imports for cookie decryption
 if platform.system().lower() == "windows":
@@ -107,6 +114,9 @@ class CrossPlatformCookieExtractor:
     
     def _try_browser_cookie3(self, browser_name: str) -> Optional[Any]:
         """Try to get cookies using browser_cookie3 library"""
+        if not HAS_BROWSER_COOKIE3:
+            logger.info("browser_cookie3 not available (ARM build)")
+            return None
         try:
             if browser_name == "firefox":
                 return browser_cookie3.firefox()
