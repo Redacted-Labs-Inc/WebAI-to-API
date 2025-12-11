@@ -67,3 +67,11 @@ class Content(BaseModel):
 
 class GoogleGenerativeRequest(BaseModel):
     contents: List[Content]
+
+
+class KagiRequest(BaseModel):
+    message: str
+    thread_id: Optional[str] = None
+    web_access: bool = True
+    model: Optional[str] = None
+    profile_id: Optional[str] = None

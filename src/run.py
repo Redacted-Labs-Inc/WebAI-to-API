@@ -30,6 +30,7 @@ except ImportError:
 from app.config import load_config
 from app.main import app as webai_app
 from app.services.gemini_client import init_gemini_client
+from app.services.kagi_client import init_kagi_client
 
 # Conditionally import g4f runner function
 try:
@@ -220,14 +221,35 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("INFO:     Checking availability of server modes...")
-    webai_is_available = asyncio.run(init_gemini_client())
-    if webai_is_available:
+    gemini_available = asyncio.run(init_gemini_client())
+    kagi_available = asyncio.run(init_kagi_client())
+    webai_is_available = gemini_available or kagi_available
+    
+    if gemini_available:
         print(
-            f"INFO:     ✅ {Colors.CYAN}WebAI-to-API mode is available{Colors.RESET} (Gemini client initialized)."
+            f"INFO:     ✅ {Colors.CYAN}Gemini client initialized{Colors.RESET}."
         )
     else:
         print(
-            f"WARN:     ⚠️ {Colors.YELLOW}WebAI-to-API mode is not available{Colors.RESET} (Could not initialize Gemini client)."
+            f"WARN:     ⚠️ {Colors.YELLOW}Gemini client not available{Colors.RESET}."
+        )
+    
+    if kagi_available:
+        print(
+            f"INFO:     ✅ {Colors.CYAN}Kagi client initialized{Colors.RESET}."
+        )
+    else:
+        print(
+            f"WARN:     ⚠️ {Colors.YELLOW}Kagi client not available{Colors.RESET}."
+        )
+    
+    if webai_is_available:
+        print(
+            f"INFO:     ✅ {Colors.CYAN}WebAI-to-API mode is available{Colors.RESET}."
+        )
+    else:
+        print(
+            f"WARN:     ⚠️ {Colors.YELLOW}WebAI-to-API mode is not available{Colors.RESET} (No AI clients initialized)."
         )
     if G4F_AVAILABLE:
         print(

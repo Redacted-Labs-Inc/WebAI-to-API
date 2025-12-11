@@ -1,7 +1,15 @@
 # src/models/gemini.py
 from typing import Optional, List, Union
 from pathlib import Path
-from gemini_webapi import GeminiClient as WebGeminiClient
+
+# Try to import gemini-webapi (may not be available on ARM)
+try:
+    from gemini_webapi import GeminiClient as WebGeminiClient
+    GEMINI_WEBAPI_AVAILABLE = True
+except ImportError:
+    WebGeminiClient = None
+    GEMINI_WEBAPI_AVAILABLE = False
+
 from app.config import CONFIG
 
 class MyGeminiClient:

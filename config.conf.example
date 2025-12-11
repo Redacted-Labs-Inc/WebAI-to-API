@@ -34,12 +34,15 @@ default_model_gemini = gemini-3.0-pro
 [Cookies]
 gemini_cookie_1psid = 
 gemini_cookie_1psidts = 
+# Kagi session cookie (leave empty to auto-extract from browser)
+kagi_session = 
 
 # --- AI Services Toggle ---
 # Enable or disable specific AI providers.
 # Use "true" to enable and "false" to disable.
 [EnabledAI]
 gemini = true
+kagi = false
 
 # --- Proxy Configuration ---
 # The app, use this proxy to connect gemini servers.

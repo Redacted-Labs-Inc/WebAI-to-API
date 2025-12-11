@@ -1,11 +1,17 @@
 # src/app/services/gemini_client.py
-from models.gemini import MyGeminiClient
 from app.config import CONFIG
 from app.logger import logger
 from app.utils.browser import get_cookie_from_browser
 
-# Import the specific exception to handle it gracefully
-from gemini_webapi.exceptions import AuthError
+# Try to import Gemini dependencies (may not be available on ARM)
+try:
+    from models.gemini import MyGeminiClient
+    from gemini_webapi.exceptions import AuthError
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    MyGeminiClient = None
+    AuthError = Exception
 
 # Global variable to store the Gemini client instance
 _gemini_client = None
@@ -16,6 +22,11 @@ async def init_gemini_client() -> bool:
     Returns True on success, False on failure.
     """
     global _gemini_client
+    
+    if not GEMINI_AVAILABLE:
+        logger.info("Gemini dependencies not installed. Gemini API will not be available.")
+        return False
+    
     if CONFIG.getboolean("EnabledAI", "gemini", fallback=True):
         try:
             gemini_cookie_1PSID = CONFIG["Cookies"].get("gemini_cookie_1PSID")
@@ -32,22 +43,19 @@ async def init_gemini_client() -> bool:
             if gemini_cookie_1PSID and gemini_cookie_1PSIDTS:
                 _gemini_client = MyGeminiClient(secure_1psid=gemini_cookie_1PSID, secure_1psidts=gemini_cookie_1PSIDTS, proxy=gemini_proxy)
                 await _gemini_client.init()
-                # logger.info("Gemini client initialized successfully.")
                 return True
             else:
                 logger.warning("Gemini cookies not found. Gemini API will not be available.")
                 return False
 
-        # FIX: Catch the specific AuthError for better logging and error handling.
         except AuthError as e:
             logger.error(
                 f"Gemini authentication or connection failed: {e}. "
-                "This could be due to expired cookies or a temporary network issue with Google's servers (like a 502 error)."
+                "This could be due to expired cookies or a temporary network issue with Google's servers."
             )
             _gemini_client = None
             return False
             
-        # Keep a general exception handler for any other unexpected issues.
         except Exception as e:
             logger.error(f"An unexpected error occurred while initializing Gemini client: {e}", exc_info=True)
             _gemini_client = None

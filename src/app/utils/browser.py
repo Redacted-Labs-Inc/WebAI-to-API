@@ -360,7 +360,7 @@ class CrossPlatformCookieExtractor:
         return None
 
 
-def get_cookie_from_browser(service: Literal["gemini"]) -> Optional[tuple]:
+def get_cookie_from_browser(service: Literal["gemini", "kagi"]) -> Optional[tuple]:
     """Enhanced cookie extraction with cross-platform support"""
     browser_name = CONFIG["Browser"].get("name", "firefox").lower()
     logger.info(f"Attempting to get cookies from browser: {browser_name} for service: {service}")
@@ -410,6 +410,32 @@ def get_cookie_from_browser(service: Literal["gemini"]) -> Optional[tuple]:
         else:
             logger.warning("Gemini cookies not found or incomplete.")
             return None
+    elif service == "kagi":
+        logger.info("Looking for Kagi session cookie (kagi_session)...")
+        kagi_session = None
+        
+        try:
+            for cookie in cookies:
+                if hasattr(cookie, 'name') and hasattr(cookie, 'value') and hasattr(cookie, 'domain'):
+                    if cookie.name == "kagi_session" and "kagi.com" in cookie.domain:
+                        kagi_session = cookie.value
+                        logger.info(f"Found kagi_session: {kagi_session[:20]}..." if kagi_session else "Found kagi_session (empty value)")
+                        break
+        except Exception as e:
+            logger.error(f"Error processing cookies: {e}")
+            return None
+        
+        if kagi_session:
+            if len(kagi_session.strip()) == 0:
+                logger.warning("Kagi session cookie found but appears to be empty.")
+                return None
+            
+            logger.info("Kagi session cookie found and appears valid.")
+            return (kagi_session,)
+        else:
+            logger.warning("Kagi session cookie not found.")
+            return None
+    
     else:
         logger.warning(f"Unsupported service: {service}")
         return None

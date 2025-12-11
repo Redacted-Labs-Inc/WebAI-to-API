@@ -9,8 +9,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
+# Set PYTHONPATH to include src directory
+ENV PYTHONPATH=/app/src
+
 # Default Port 
 EXPOSE 6969
 
-# Run Uvicorn server
+# Run Uvicorn server from src directory
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "6969"]
