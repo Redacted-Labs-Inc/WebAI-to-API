@@ -53,6 +53,8 @@ This design provides both **speed and redundancy**, ensuring flexibility dependi
     - `/gemini-chat`
     - `/translate`
     - `/v1beta/models/{model}` (Google Generative AI v1beta API)
+    - `/kagi` (Kagi Assistant text)
+    - `/kagi/image` (Kagi Assistant with image upload)
 
   - **gpt4free Server**:
     - `/v1`
@@ -169,6 +171,59 @@ Provides access to the latest Google Generative AI models with standard Google A
 
 ---
 
+### Kagi Assistant Endpoints
+
+> `POST /kagi`
+
+Send a text message to Kagi Assistant. Returns the AI response.
+
+**Request Body (JSON):**
+```json
+{
+  "message": "What is the capital of France?",
+  "model": "ki_quick",
+  "profile_id": null
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message` | string | Yes | - | Your prompt/question |
+| `model` | string | No | `ki_quick` | Model to use |
+| `profile_id` | string | No | `null` | Kagi profile ID |
+
+**Example:**
+```bash
+curl -X POST http://localhost:6969/kagi \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!", "model": "ki_quick"}'
+```
+
+---
+
+> `POST /kagi/image`
+
+Send an image with a message to Kagi Assistant for vision analysis.
+
+**Request Body (multipart/form-data):**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message` | string | Yes | - | Your prompt/question about the image |
+| `file` | file | Yes | - | Image file (PNG, JPG, etc.) |
+| `model` | string | No | `ki_quick` | Model to use |
+| `profile_id` | string | No | `null` | Kagi profile ID |
+
+**Example:**
+```bash
+curl -X POST http://localhost:6969/kagi/image \
+  -F "message=What's in this image?" \
+  -F "file=@/path/to/image.png" \
+  -F "model=ki_quick"
+```
+
+---
+
 ### gpt4free Endpoints
 
 These endpoints follow the **OpenAI-compatible structure** and are powered by the `gpt4free` library.  
@@ -240,9 +295,11 @@ GET  /images/{filename}             # Retrieve images
 
 | Section     | Option     | Description                                | Example Value           |
 | ----------- | ---------- | ------------------------------------------ | ----------------------- |
-| [AI]        | default_ai | Default service for `/v1/chat/completions` | `gemini`                |
+| [AI]        | default_ai | Default service for `/v1/chat/completions` | `gemini` or `kagi`      |
 | [Browser]   | name       | Browser for cookie-based authentication    | `firefox`               |
 | [EnabledAI] | gemini     | Enable/disable Gemini service              | `true`                  |
+| [EnabledAI] | kagi       | Enable/disable Kagi service                | `true`                  |
+| [Cookies]   | kagi_session | Kagi session cookie                      | (from browser)          |
 | [Proxy]     | http_proxy | Proxy for Gemini connections (optional)    | `http://127.0.0.1:2334` |
 
 The complete configuration template is available in [`WebAI-to-API/config.conf.example`](WebAI-to-API/config.conf.example).  
@@ -254,19 +311,24 @@ If the cookies are left empty, the application will automatically retrieve them 
 
 ```ini
 [AI]
-# Default AI service.
+# Default AI service: gemini or kagi
 default_ai = gemini
 
 # Default model for Gemini.
 default_model_gemini = gemini-3.0-pro
 
+[Cookies]
 # Gemini cookies (leave empty to use browser_cookies3 for automatic authentication).
 gemini_cookie_1psid =
 gemini_cookie_1psidts =
 
+# Kagi session cookie (get from browser devtools at kagi.com)
+kagi_session =
+
 [EnabledAI]
 # Enable or disable AI services.
 gemini = true
+kagi = true
 
 [Browser]
 # Default browser options: firefox, brave, chrome, edge, safari.
@@ -298,16 +360,19 @@ src/
 │   │   ├── __init__.py
 │   │   ├── gemini.py          # Endpoints for Gemini (e.g., /gemini, /gemini-chat).
 │   │   ├── chat.py            # Endpoints for translation and OpenAI-compatible requests.
-│   │   └── google_generative.py  # Google Generative AI v1beta API endpoints.
+│   │   ├── google_generative.py  # Google Generative AI v1beta API endpoints.
+│   │   └── kagi.py            # Endpoints for Kagi Assistant (/kagi, /kagi/image).
 │   ├── services/              # Business logic and service wrappers.
 │   │   ├── __init__.py
 │   │   ├── gemini_client.py   # Gemini client initialization, content generation, and cleanup.
+│   │   ├── kagi_client.py     # Kagi client initialization and management.
 │   │   └── session_manager.py # Session management for chat and translation.
 │   └── utils/                 # Helper functions.
 │       ├── __init__.py
 │       └── browser.py         # Browser-based cookie retrieval.
-├── models/                    # Models and wrappers (e.g., MyGeminiClient).
-│   └── gemini.py
+├── models/                    # Models and wrappers.
+│   ├── gemini.py              # Gemini Web API client wrapper.
+│   └── kagi.py                # Kagi Assistant client.
 ├── schemas/                   # Pydantic schemas for request/response validation.
 │   └── request.py
 ├── config.conf                # Application configuration file.
