@@ -56,9 +56,10 @@ class KagiClient:
         web_access: bool = True,
         model: Optional[str] = None,
         profile_id: Optional[str] = None
-    ) -> str:
+    ) -> dict:
         """
         Send a message to Kagi Assistant and return the response.
+        Returns dict with 'content' and 'references'.
         """
         if not self._client:
             raise Exception("Client not initialized. Call init() first.")
@@ -113,9 +114,10 @@ class KagiClient:
         web_access: bool = True,
         model: Optional[str] = None,
         profile_id: Optional[str] = None
-    ) -> str:
+    ) -> dict:
         """
         Send a message with an image to Kagi Assistant.
+        Returns dict with 'content' and 'references'.
         
         Args:
             message: The prompt text
@@ -265,48 +267,105 @@ class KagiClient:
                     pass
         return None
     
-    def _parse_response(self, response_text: str) -> str:
-        """Parse the response from Kagi's HTML/script-based streaming format."""
+    def _parse_response(self, response_text: str) -> dict:
+        """
+        Parse the response from Kagi's HTML/script-based streaming format.
+        Returns dict with 'content', 'references', and 'reasoning'.
+        """
         import re
-        import html
+        import html as html_module
         
-        # Look for the final message JSON containing the reply or md (markdown)
-        pattern = r'<div hidden>({[^<]+})</div>\s*<script[^>]*>scriptStreamCallback\("new_message\.json"'
+        result = {"content": "", "references": [], "reasoning": None}
+        
+        # Find all JSON payloads in hidden divs
+        pattern = r'<div hidden>({[^<]+})</div>'
         matches = re.findall(pattern, response_text)
         
         for match in reversed(matches):
             try:
-                decoded = html.unescape(match)
+                decoded = html_module.unescape(match)
                 data = json.loads(decoded)
-                # Prefer markdown if available, otherwise use reply
-                if data.get("md"):
-                    return data["md"]
-                if data.get("reply"):
-                    return data["reply"]
+                
+                # Extract content (prefer markdown)
+                if not result["content"]:
+                    if data.get("md"):
+                        result["content"] = data["md"]
+                    elif data.get("reply"):
+                        result["content"] = data["reply"]
+                
+                # Extract reasoning from the HTML reply field
+                if data.get("reply") and not result["reasoning"]:
+                    result["reasoning"] = self._extract_reasoning(data["reply"])
+                
+                # Extract references from references_html
+                if data.get("references_html") and not result["references"]:
+                    result["references"] = self._parse_references_html(data["references_html"])
+                    
             except (json.JSONDecodeError, KeyError):
                 continue
         
         # Fallback: look for output chunks (streaming chunks)
-        output_pattern = r'<div hidden>({[^<]*"output"[^<]*})</div>'
-        output_matches = re.findall(output_pattern, response_text)
+        if not result["content"]:
+            output_pattern = r'<div hidden>({[^<]*"output"[^<]*})</div>'
+            output_matches = re.findall(output_pattern, response_text)
+            
+            output_parts = []
+            for match in output_matches:
+                try:
+                    decoded = html_module.unescape(match)
+                    data = json.loads(decoded)
+                    if "output" in data:
+                        output_parts.append(data["output"])
+                except (json.JSONDecodeError, KeyError):
+                    continue
+            
+            if output_parts:
+                result["content"] = "".join(output_parts)
         
-        output_parts = []
-        for match in output_matches:
-            try:
-                decoded = html.unescape(match)
-                data = json.loads(decoded)
-                if "output" in data:
-                    output_parts.append(data["output"])
-            except (json.JSONDecodeError, KeyError):
-                continue
+        # Final fallback: strip HTML
+        if not result["content"]:
+            clean = re.sub(r'<[^>]+>', '', response_text)
+            clean = html_module.unescape(clean).strip()
+            result["content"] = clean if clean else response_text
         
-        if output_parts:
-            return "".join(output_parts)
+        return result
+    
+    def _parse_references_html(self, html: str) -> list:
+        """Extract references from Kagi's references_html field."""
+        import re
+        import html as html_module
         
-        # Strip HTML and return clean text
-        clean = re.sub(r'<[^>]+>', '', response_text)
-        clean = html.unescape(clean).strip()
-        return clean if clean else response_text
+        references = []
+        # Pattern to extract href, title, and contribution percentage
+        li_pattern = r'<li[^>]*>.*?<a href="([^"]+)"[^>]*>([^<]+)</a>.*?<span class="contribution"[^>]*>(\d+)%</span>.*?</li>'
+        
+        for match in re.finditer(li_pattern, html, re.DOTALL):
+            url, title, contribution = match.groups()
+            references.append({
+                "url": html_module.unescape(url),
+                "title": html_module.unescape(title).strip(),
+                "contribution": int(contribution)
+            })
+        
+        return references
+    
+    def _extract_reasoning(self, html: str) -> Optional[str]:
+        """Extract reasoning/planning from Kagi's Response planned block."""
+        import re
+        import html as html_module
+        
+        # Pattern for <details><summary>Response planned</summary>...<br>CONTENT<p></p></details>
+        pattern = r'<details>\s*<summary>Response planned</summary>\s*<br>\s*(.*?)\s*<p></p>\s*</details>'
+        match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            reasoning = match.group(1).strip()
+            # Clean up any remaining HTML tags
+            reasoning = re.sub(r'<[^>]+>', '', reasoning)
+            reasoning = html_module.unescape(reasoning).strip()
+            return reasoning if reasoning else None
+        
+        return None
     
     def _parse_sse_line(self, line: str) -> Optional[str]:
         """Parse a Server-Sent Events line."""

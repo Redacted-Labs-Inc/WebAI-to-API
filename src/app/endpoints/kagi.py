@@ -13,9 +13,9 @@ router = APIRouter()
 DEFAULT_KAGI_MODEL = "ki_quick"
 
 
-def to_openai_format(content: str, model: str, stream: bool = False) -> dict:
-    """Convert a response to OpenAI-compatible format."""
-    return {
+def to_openai_format(content: str, model: str, references: list = None, reasoning: str = None, stream: bool = False) -> dict:
+    """Convert a response to OpenAI-compatible format with optional references and reasoning."""
+    result = {
         "id": f"kagi-{int(time.time() * 1000)}",
         "object": "chat.completion.chunk" if stream else "chat.completion",
         "created": int(time.time()),
@@ -36,27 +36,37 @@ def to_openai_format(content: str, model: str, stream: bool = False) -> dict:
             "total_tokens": 0,
         },
     }
+    
+    # Add references as a custom field
+    if references:
+        result["references"] = references
+    
+    # Add reasoning/planning as a custom field (similar to OpenAI's reasoning_content)
+    if reasoning:
+        result["reasoning"] = reasoning
+    
+    return result
 
 
 @router.post("/kagi")
 async def kagi_generate(request: KagiRequest):
     """
     Generate a response from Kagi Assistant.
-    Returns OpenAI-compatible format.
+    Returns OpenAI-compatible format with references.
     """
     kagi_client = get_kagi_client()
     if not kagi_client:
         raise HTTPException(status_code=503, detail="Kagi client is not initialized.")
     
     try:
-        response = await kagi_client.generate_content(
+        result = await kagi_client.generate_content(
             message=request.message,
             thread_id=request.thread_id,
             web_access=request.web_access,
             model=request.model,
             profile_id=request.profile_id
         )
-        return to_openai_format(response, request.model)
+        return to_openai_format(result["content"], request.model, result.get("references"), result.get("reasoning"))
     except Exception as e:
         logger.error(f"Error in /kagi endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
@@ -73,7 +83,7 @@ async def kagi_generate_with_image(
 ):
     """
     Generate a response from Kagi Assistant with an image.
-    Returns OpenAI-compatible format.
+    Returns OpenAI-compatible format with references.
     """
     kagi_client = get_kagi_client()
     if not kagi_client:
@@ -81,7 +91,7 @@ async def kagi_generate_with_image(
     
     try:
         image_bytes = await file.read()
-        response = await kagi_client.generate_content_with_image(
+        result = await kagi_client.generate_content_with_image(
             message=message,
             image=image_bytes,
             image_filename=file.filename or "image.png",
@@ -91,7 +101,7 @@ async def kagi_generate_with_image(
             model=model,
             profile_id=profile_id
         )
-        return to_openai_format(response, model)
+        return to_openai_format(result["content"], model, result.get("references"), result.get("reasoning"))
     except Exception as e:
         logger.error(f"Error in /kagi/image endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
