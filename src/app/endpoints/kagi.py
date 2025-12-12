@@ -5,16 +5,44 @@ from app.logger import logger
 from schemas.request import KagiRequest
 from app.services.kagi_client import get_kagi_client
 import json
+import time
 from typing import Optional
 
 router = APIRouter()
+
+DEFAULT_KAGI_MODEL = "ki_quick"
+
+
+def to_openai_format(content: str, model: str, stream: bool = False) -> dict:
+    """Convert a response to OpenAI-compatible format."""
+    return {
+        "id": f"kagi-{int(time.time() * 1000)}",
+        "object": "chat.completion.chunk" if stream else "chat.completion",
+        "created": int(time.time()),
+        "model": model or DEFAULT_KAGI_MODEL,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+    }
 
 
 @router.post("/kagi")
 async def kagi_generate(request: KagiRequest):
     """
     Generate a response from Kagi Assistant.
-    Each request can optionally continue a thread or start fresh.
+    Returns OpenAI-compatible format.
     """
     kagi_client = get_kagi_client()
     if not kagi_client:
@@ -28,7 +56,7 @@ async def kagi_generate(request: KagiRequest):
             model=request.model,
             profile_id=request.profile_id
         )
-        return {"response": response}
+        return to_openai_format(response, request.model)
     except Exception as e:
         logger.error(f"Error in /kagi endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
@@ -45,6 +73,7 @@ async def kagi_generate_with_image(
 ):
     """
     Generate a response from Kagi Assistant with an image.
+    Returns OpenAI-compatible format.
     """
     kagi_client = get_kagi_client()
     if not kagi_client:
@@ -62,7 +91,7 @@ async def kagi_generate_with_image(
             model=model,
             profile_id=profile_id
         )
-        return {"response": response}
+        return to_openai_format(response, model)
     except Exception as e:
         logger.error(f"Error in /kagi/image endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error generating content: {str(e)}")
@@ -72,10 +101,13 @@ async def kagi_generate_with_image(
 async def kagi_generate_stream(request: KagiRequest):
     """
     Generate a streaming response from Kagi Assistant.
+    Returns OpenAI-compatible SSE stream format.
     """
     kagi_client = get_kagi_client()
     if not kagi_client:
         raise HTTPException(status_code=503, detail="Kagi client is not initialized.")
+    
+    model = request.model or DEFAULT_KAGI_MODEL
     
     async def generate():
         try:
@@ -83,9 +115,34 @@ async def kagi_generate_stream(request: KagiRequest):
                 message=request.message,
                 thread_id=request.thread_id,
                 web_access=request.web_access,
-                model=request.model
+                model=model
             ):
-                yield f"data: {json.dumps({'text': chunk})}\n\n"
+                chunk_data = {
+                    "id": f"kagi-{int(time.time() * 1000)}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": chunk},
+                        "finish_reason": None
+                    }]
+                }
+                yield f"data: {json.dumps(chunk_data)}\n\n"
+            
+            # Final chunk with finish_reason
+            final_chunk = {
+                "id": f"kagi-{int(time.time() * 1000)}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Error in /kagi/stream endpoint: {e}", exc_info=True)
