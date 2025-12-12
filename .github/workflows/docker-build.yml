@@ -3,6 +3,8 @@ name: Build Multi-Arch Docker Images
 on:
   push:
     branches: [main, master]
+    tags:
+      - 'v*.*.*'
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -24,6 +26,12 @@ jobs:
       - name: Set lowercase image name
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
+      - name: Read version from file
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '\n')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -38,6 +46,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata for amd64
+        id: meta-amd64
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=amd64,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Extract metadata for arm64
+        id: meta-arm64
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            suffix=-arm64,onlatest=false
+          tags: |
+            type=raw,value=arm64,enable={{is_default_branch}}
+            type=semver,pattern={{version}}-arm64
+            type=semver,pattern={{major}}.{{minor}}-arm64
+            type=sha,prefix=,suffix=-arm64
+            type=raw,value=${{ steps.version.outputs.version }}-arm64,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+
       - name: Build and push full image (amd64)
         uses: docker/build-push-action@v5
         with:
@@ -45,9 +82,8 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:amd64
+          tags: ${{ steps.meta-amd64.outputs.tags }}
+          labels: ${{ steps.meta-amd64.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -58,7 +94,7 @@ jobs:
           file: Dockerfile.arm
           platforms: linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arm64
+          tags: ${{ steps.meta-arm64.outputs.tags }}
+          labels: ${{ steps.meta-arm64.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
