@@ -271,13 +271,14 @@ class KagiClient:
         """
         Parse the response from Kagi's HTML/script-based streaming format.
         Returns dict with 'content', 'references', and 'reasoning'.
+        Handles both HTML format (text requests) and streaming format (image requests).
         """
         import re
         import html as html_module
         
         result = {"content": "", "references": [], "reasoning": None}
         
-        # Find all JSON payloads in hidden divs
+        # Try HTML format first (hidden divs with JSON)
         pattern = r'<div hidden>({[^<]+})</div>'
         matches = re.findall(pattern, response_text)
         
@@ -286,25 +287,42 @@ class KagiClient:
                 decoded = html_module.unescape(match)
                 data = json.loads(decoded)
                 
-                # Extract content (prefer markdown)
                 if not result["content"]:
                     if data.get("md"):
                         result["content"] = data["md"]
                     elif data.get("reply"):
                         result["content"] = data["reply"]
                 
-                # Extract reasoning from the HTML reply field
                 if data.get("reply") and not result["reasoning"]:
                     result["reasoning"] = self._extract_reasoning(data["reply"])
                 
-                # Extract references from references_html
                 if data.get("references_html") and not result["references"]:
                     result["references"] = self._parse_references_html(data["references_html"])
                     
             except (json.JSONDecodeError, KeyError):
                 continue
         
-        # Fallback: look for output chunks (streaming chunks)
+        # Try streaming format (for image requests): new_message.json:{...}
+        if not result["content"]:
+            stream_pattern = r'new_message\.json:({[^\x00]+?)(?:\x00|$)'
+            stream_matches = re.findall(stream_pattern, response_text)
+            
+            for match in reversed(stream_matches):
+                try:
+                    data = json.loads(match)
+                    if data.get("state") == "done":
+                        if data.get("md"):
+                            result["content"] = data["md"]
+                        elif data.get("reply"):
+                            result["content"] = data["reply"]
+                        
+                        if data.get("reply") and not result["reasoning"]:
+                            result["reasoning"] = self._extract_reasoning(data["reply"])
+                        break
+                except json.JSONDecodeError:
+                    continue
+        
+        # Fallback: look for output chunks
         if not result["content"]:
             output_pattern = r'<div hidden>({[^<]*"output"[^<]*})</div>'
             output_matches = re.findall(output_pattern, response_text)
@@ -322,7 +340,7 @@ class KagiClient:
             if output_parts:
                 result["content"] = "".join(output_parts)
         
-        # Final fallback: strip HTML
+        # Final fallback
         if not result["content"]:
             clean = re.sub(r'<[^>]+>', '', response_text)
             clean = html_module.unescape(clean).strip()
@@ -349,20 +367,27 @@ class KagiClient:
         
         return references
     
-    def _extract_reasoning(self, html: str) -> Optional[str]:
+    def _extract_reasoning(self, text: str) -> Optional[str]:
         """Extract reasoning/planning from Kagi's Response planned block."""
         import re
         import html as html_module
         
-        # Pattern for <details><summary>Response planned</summary>...<br>CONTENT<p></p></details>
-        pattern = r'<details>\s*<summary>Response planned</summary>\s*<br>\s*(.*?)\s*<p></p>\s*</details>'
-        match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
+        # Try HTML format: <details><summary>Response planned</summary>...<br>CONTENT<p></p></details>
+        html_pattern = r'<details>\s*<summary>Response planned</summary>\s*<br>\s*(.*?)\s*<p></p>\s*</details>'
+        match = re.search(html_pattern, text, re.DOTALL | re.IGNORECASE)
         
         if match:
             reasoning = match.group(1).strip()
-            # Clean up any remaining HTML tags
             reasoning = re.sub(r'<[^>]+>', '', reasoning)
             reasoning = html_module.unescape(reasoning).strip()
+            return reasoning if reasoning else None
+        
+        # Try plaintext format (image responses): "Response planned\n CONTENT\n"
+        plain_pattern = r'Response planned\n\s*(.*?)(?:\n[A-Z]|$)'
+        match = re.search(plain_pattern, text, re.DOTALL)
+        
+        if match:
+            reasoning = match.group(1).strip()
             return reasoning if reasoning else None
         
         return None

@@ -56,7 +56,7 @@ class GeminiRequest(BaseModel):
 
 class OpenAIChatRequest(BaseModel):
     messages: List[dict]
-    model: Optional[GeminiModels] = None
+    model: Optional[str] = None
     stream: Optional[bool] = False
 
 class Part(BaseModel):
@@ -67,6 +67,14 @@ class Content(BaseModel):
 
 class GoogleGenerativeRequest(BaseModel):
     contents: List[Content]
+
+
+class KagiModels(str, Enum):
+    """Kagi Assistant models."""
+    QUICK = "kagi-quick"
+    RESEARCH = "kagi-research"
+    CODE = "kagi-code"
+    CHAT = "kagi-chat"
 
 
 class KagiRequest(BaseModel):

@@ -173,9 +173,70 @@ Provides access to the latest Google Generative AI models with standard Google A
 
 ### Kagi Assistant Endpoints
 
+Kagi Assistant is available through both the standard OpenAI-compatible endpoint and dedicated Kagi endpoints.
+
+#### OpenAI-Compatible Endpoint (Recommended)
+
+Use `/v1/chat/completions` with a `kagi-*` model for drop-in compatibility with OpenAI clients.
+
+**Available Models:**
+- `kagi-quick` (default, fast responses)
+- `kagi-research` (deeper research)
+- `kagi-code` (code-focused)
+- `kagi-chat` (conversational)
+
+**Text Request:**
+```bash
+curl -X POST http://localhost:6969/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kagi-quick",
+    "messages": [{"role": "user", "content": "What is Python?"}]
+  }'
+```
+
+**Image Request (base64):**
+```bash
+curl -X POST http://localhost:6969/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kagi-quick",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo..."}}
+      ]
+    }]
+  }'
+```
+
+**Response Format:**
+```json
+{
+  "id": "chatcmpl-123456",
+  "object": "chat.completion",
+  "model": "kagi-quick",
+  "choices": [{
+    "message": {"role": "assistant", "content": "Python is a programming language..."},
+    "finish_reason": "stop"
+  }],
+  "references": [
+    {"url": "https://...", "title": "Source Title", "contribution": 35}
+  ],
+  "reasoning": "Planning to explain Python basics..."
+}
+```
+
+The response includes optional `references` (source citations with URLs and contribution percentages) and `reasoning` (Kagi's internal planning).
+
+---
+
+#### Direct Kagi Endpoints
+
 > `POST /kagi`
 
-Send a text message to Kagi Assistant. Returns the AI response.
+Send a text message to Kagi Assistant.
 
 **Request Body (JSON):**
 ```json
@@ -189,21 +250,14 @@ Send a text message to Kagi Assistant. Returns the AI response.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `message` | string | Yes | - | Your prompt/question |
-| `model` | string | No | `ki_quick` | Model to use |
+| `model` | string | No | `ki_quick` | Internal model name |
 | `profile_id` | string | No | `null` | Kagi profile ID |
-
-**Example:**
-```bash
-curl -X POST http://localhost:6969/kagi \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello!", "model": "ki_quick"}'
-```
 
 ---
 
 > `POST /kagi/image`
 
-Send an image with a message to Kagi Assistant for vision analysis.
+Send an image with a message to Kagi Assistant.
 
 **Request Body (multipart/form-data):**
 
@@ -211,15 +265,14 @@ Send an image with a message to Kagi Assistant for vision analysis.
 |-----------|------|----------|---------|-------------|
 | `message` | string | Yes | - | Your prompt/question about the image |
 | `file` | file | Yes | - | Image file (PNG, JPG, etc.) |
-| `model` | string | No | `ki_quick` | Model to use |
+| `model` | string | No | `ki_quick` | Internal model name |
 | `profile_id` | string | No | `null` | Kagi profile ID |
 
 **Example:**
 ```bash
 curl -X POST http://localhost:6969/kagi/image \
   -F "message=What's in this image?" \
-  -F "file=@/path/to/image.png" \
-  -F "model=ki_quick"
+  -F "file=@/path/to/image.png"
 ```
 
 ---
