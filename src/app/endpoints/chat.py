@@ -114,6 +114,7 @@ def convert_to_openai_format(response_text: str, model: str, references: list = 
     return result
 
 @router.post("/v1/chat/completions")
+@router.post("/chat/completions")
 async def chat_completions(request: OpenAIChatRequest):
     is_stream = request.stream if request.stream is not None else False
     
