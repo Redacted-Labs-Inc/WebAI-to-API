@@ -154,6 +154,7 @@ def is_kagi_model(model: str) -> bool:
 def parse_openai_messages(messages: list) -> tuple[str, bytes | None, str | None]:
     """
     Parse OpenAI-format messages and extract text content and optional image.
+    Includes system messages as context and user messages as the prompt.
     Returns (text_content, image_bytes, image_mime_type)
     """
     text_parts = []
@@ -161,21 +162,26 @@ def parse_openai_messages(messages: list) -> tuple[str, bytes | None, str | None
     image_mime = None
     
     for msg in messages:
-        if msg.get("role") != "user":
+        role = msg.get("role")
+        # Include system and user messages (skip assistant messages which are AI responses)
+        if role not in ("system", "user"):
             continue
+        
+        # Add role prefix for clarity when combining messages
+        prefix = "[Context]\n" if role == "system" else ""
             
         content = msg.get("content")
         
         # Simple string content
         if isinstance(content, str):
-            text_parts.append(content)
+            text_parts.append(prefix + content)
             continue
         
         # Array content (OpenAI vision format)
         if isinstance(content, list):
             for part in content:
                 if part.get("type") == "text":
-                    text_parts.append(part.get("text", ""))
+                    text_parts.append(prefix + part.get("text", ""))
                 elif part.get("type") == "image_url":
                     image_url = part.get("image_url", {})
                     url = image_url.get("url", "") if isinstance(image_url, dict) else image_url
