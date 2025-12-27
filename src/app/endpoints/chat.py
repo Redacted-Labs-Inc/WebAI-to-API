@@ -13,8 +13,11 @@ from typing import Optional
 
 router = APIRouter()
 
-# In-memory file storage (for uploaded files)
-_uploaded_files: dict[str, dict] = {}
+# File storage directory
+import os
+import json
+FILE_STORAGE_DIR = "/tmp/webai_files"
+os.makedirs(FILE_STORAGE_DIR, exist_ok=True)
 
 # Available models for /v1/models endpoint
 AVAILABLE_MODELS = [
@@ -23,6 +26,13 @@ AVAILABLE_MODELS = [
     {"id": "kagi-code", "object": "model", "owned_by": "kagi", "created": 1700000000},
     {"id": "kagi-chat", "object": "model", "owned_by": "kagi", "created": 1700000000},
 ]
+
+
+@router.get("/")
+@router.get("/v1")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok", "message": "WebAI-to-API is running"}
 
 
 @router.get("/v1/models")
@@ -45,6 +55,13 @@ async def get_model(model_id: str):
     raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
 
 
+def _get_file_path(file_id: str) -> str:
+    return os.path.join(FILE_STORAGE_DIR, file_id)
+
+def _get_meta_path(file_id: str) -> str:
+    return os.path.join(FILE_STORAGE_DIR, f"{file_id}.meta")
+
+
 @router.post("/v1/files")
 @router.post("/files")
 async def upload_file(file: UploadFile = File(...), purpose: str = Form("assistants")):
@@ -52,65 +69,72 @@ async def upload_file(file: UploadFile = File(...), purpose: str = Form("assista
     file_id = f"file-{uuid.uuid4().hex[:24]}"
     content = await file.read()
     
-    _uploaded_files[file_id] = {
-        "id": file_id,
-        "object": "file",
-        "bytes": len(content),
-        "created_at": int(time.time()),
-        "filename": file.filename,
-        "purpose": purpose,
-        "content": content,
-        "content_type": file.content_type,
-    }
+    # Save file content
+    with open(_get_file_path(file_id), "wb") as f:
+        f.write(content)
     
-    return {
+    # Save metadata
+    meta = {
         "id": file_id,
         "object": "file",
         "bytes": len(content),
         "created_at": int(time.time()),
         "filename": file.filename,
         "purpose": purpose,
+        "content_type": file.content_type or "application/octet-stream",
     }
+    with open(_get_meta_path(file_id), "w") as f:
+        json.dump(meta, f)
+    
+    return meta
 
 
 @router.get("/v1/files")
 @router.get("/files")
 async def list_files():
     """List uploaded files."""
-    return {
-        "object": "list",
-        "data": [
-            {k: v for k, v in f.items() if k != "content"}
-            for f in _uploaded_files.values()
-        ]
-    }
+    files = []
+    for filename in os.listdir(FILE_STORAGE_DIR):
+        if filename.endswith(".meta"):
+            with open(os.path.join(FILE_STORAGE_DIR, filename)) as f:
+                files.append(json.load(f))
+    return {"object": "list", "data": files}
 
 
 @router.get("/v1/files/{file_id}")
 @router.get("/files/{file_id}")
 async def get_file(file_id: str):
     """Get file metadata."""
-    if file_id not in _uploaded_files:
+    meta_path = _get_meta_path(file_id)
+    if not os.path.exists(meta_path):
         raise HTTPException(status_code=404, detail="File not found")
-    f = _uploaded_files[file_id]
-    return {k: v for k, v in f.items() if k != "content"}
+    with open(meta_path) as f:
+        return json.load(f)
 
 
 @router.delete("/v1/files/{file_id}")
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str):
     """Delete a file."""
-    if file_id not in _uploaded_files:
+    file_path = _get_file_path(file_id)
+    meta_path = _get_meta_path(file_id)
+    if not os.path.exists(meta_path):
         raise HTTPException(status_code=404, detail="File not found")
-    del _uploaded_files[file_id]
+    os.remove(file_path)
+    os.remove(meta_path)
     return {"id": file_id, "object": "file", "deleted": True}
 
 
 def get_file_content(file_id: str) -> tuple[bytes, str] | None:
     """Get file content by ID."""
-    if file_id in _uploaded_files:
-        f = _uploaded_files[file_id]
-        return f["content"], f.get("content_type", "application/octet-stream")
+    file_path = _get_file_path(file_id)
+    meta_path = _get_meta_path(file_id)
+    if os.path.exists(file_path) and os.path.exists(meta_path):
+        with open(file_path, "rb") as f:
+            content = f.read()
+        with open(meta_path) as f:
+            meta = json.load(f)
+        return content, meta.get("content_type", "application/octet-stream")
     return None
 
 # Map OpenAI-style Kagi model names to Kagi's internal names
@@ -293,3 +317,32 @@ async def chat_completions(request: OpenAIChatRequest):
     except Exception as e:
         logger.error(f"Error in /v1/chat/completions (Gemini): {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing chat completion: {str(e)}")
+
+
+# Legacy completions endpoint (non-chat)
+@router.post("/v1/completions")
+@router.post("/completions")
+async def completions(request: dict):
+    """Legacy completions endpoint (converts to chat format)."""
+    prompt = request.get("prompt", "")
+    model = request.get("model", "kagi-quick")
+    
+    # Convert to chat format
+    chat_request = OpenAIChatRequest(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        stream=request.get("stream", False)
+    )
+    
+    return await chat_completions(chat_request)
+
+
+# Embeddings endpoint (returns error; not supported)
+@router.post("/v1/embeddings")
+@router.post("/embeddings")
+async def embeddings(request: dict):
+    """Embeddings endpoint (not supported; returns helpful error)."""
+    raise HTTPException(
+        status_code=501,
+        detail="Embeddings are not supported by this API. Kagi Assistant does not provide embedding models. Use a dedicated embedding service like OpenAI, Ollama, or sentence-transformers."
+    )
